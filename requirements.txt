@@ -1,7 +1,7 @@
-langchain_community
-langchain_text_splitters
-langchain_openai
-langchain_chroma 
-gradio 
-python-dotenv 
-pypdf
+langchain
+langchain-community
+langchain-huggingface
+langchain-chroma
+gradio
+huggingface_hub
+python-dotenv
