@@ -1,85 +1,95 @@
-# from langchain_community.embeddings import OllamaEmbeddings
+"""A RAG chatbot using Ollama and Chroma with web search fallback."""
+
 from langchain_ollama import OllamaEmbeddings
-from langchain_community.llms import Ollama
+from langchain_ollama import OllamaLLM
 from langchain_chroma import Chroma
-from duckduckgo_search import DDGS  # For web search fallback
+from duckduckgo_search import DDGS
 import gradio as gr
-from dotenv import load_dotenv
+import config  # Import configuration
+import time
 
-# Load environment variables
-load_dotenv()
+def initialize_retriever():
+    """Initialize the Chroma vector store and retriever."""
+    embeddings = OllamaEmbeddings(model=config.EMBEDDING_MODEL)
+    vector_store = Chroma(
+        collection_name=config.COLLECTION_NAME,
+        embedding_function=embeddings,
+        persist_directory=config.CHROMA_PATH,
+    )
+    return vector_store.as_retriever(search_kwargs={"k": config.NUM_RESULTS})
 
-# Configuration
-DATA_PATH = r"data"
-CHROMA_PATH = r"chroma_db"
-
-# Initiate the embeddings model (Ollama)
-embeddings_model = OllamaEmbeddings(model="nomic-embed-text")  # Replace with your preferred Ollama embedding model
-
-# Initiate the Ollama language model
-llm = Ollama(model="llama3")  # Replace with your preferred Ollama model, e.g., "mistral", "llama3", etc.
-
-# Connect to the Chroma vector store
-vector_store = Chroma(
-    collection_name="example_collection",
-    embedding_function=embeddings_model,
-    persist_directory=CHROMA_PATH,
-)
-
-# Set up the retriever
-num_results = 5
-retriever = vector_store.as_retriever(search_kwargs={'k': num_results})
-
-# Web search function (fallback)
 def web_search(query, max_results=3):
-    with DDGS() as ddgs:
-        results = ddgs.text(query, max_results=max_results)
-        web_knowledge = "\n\n".join([f"{r['title']}: {r['body']}" for r in results])
-    return web_knowledge
+    """Perform a web search using DuckDuckGo."""
+    try:
+        with DDGS() as ddgs:
+            results = ddgs.text(query, max_results=max_results)
+            return "\n\n".join([f"{r['title']}: {r['body']}" for r in results])
+    except Exception as e:
+        return f"Web search failed: {e}"
 
-# Stream response function
-def stream_response(message, history):
-    # Retrieve relevant chunks from the vector store
+def generate_response(message, history, retriever, llm):
+    """Generate a response based on retrieved documents or web search."""
     docs = retriever.invoke(message)
     knowledge = "\n\n".join([doc.page_content for doc in docs])
 
-    # Check if there's sufficient knowledge from files
     if not knowledge.strip() or len(docs) == 0:
-        # Fallback to web search
         knowledge = web_search(message)
-        source = "the internet"
-    else:
-        source = "provided files"
 
-    # Construct the prompt
-    rag_prompt = f"""
-    You are an assistant that answers questions based on the provided knowledge.
+    prompt = f"""
+    You are an assistant that answers questions based on provided knowledge.
     Use only the information in the "The knowledge" section to answer, unless it's empty.
-    Do not mention the source of the knowledge to the user unless explicitly asked.
+    Do not mention the source unless explicitly asked.
 
     The question: {message}
-
     Conversation history: {history}
-
     The knowledge: {knowledge}
     """
 
-    # Stream the response
     partial_message = ""
-    for response in llm.stream(rag_prompt):
-        partial_message += response
-        yield partial_message
+    for chunk in llm.stream(prompt):
+        partial_message += chunk
+        yield partial_message  # Yield chunks for streaming
 
-# Initiate the Gradio app
-chatbot = gr.ChatInterface(
-    stream_response,
-    textbox=gr.Textbox(
-        placeholder="Ask me anything...",
-        container=False,
-        autoscroll=True,
-        scale=7
-    ),
-)
+def main():
+    """Launch the Gradio chatbot interface with streaming and processing time."""
+    retriever = initialize_retriever()
+    llm = OllamaLLM(model=config.LLM_MODEL)
 
-# Launch the Gradio app
-chatbot.launch()
+    # Define the interface with a Chatbot and Textbox
+    with gr.Blocks() as demo:
+        chatbot = gr.Chatbot()
+        textbox = gr.Textbox(placeholder="Ask me anything...", container=False, scale=7)
+
+        def update_chat(message, history):
+            # Initialize history if None
+            if history is None:
+                history = []
+            # Append user message to history and yield immediately to show it
+            history.append([message, ""])
+            yield history, ""  # Show the user's message in the UI and clear the textbox
+            
+            # Measure processing time
+            start_time = time.time()
+            # Stream the assistant's response
+            for partial_response in generate_response(message, history, retriever, llm):
+                history[-1][1] = partial_response  # Update the assistant's response
+                yield history, ""  # Continue yielding updated history and keep textbox clear
+            end_time = time.time()
+            processing_time = end_time - start_time
+            
+            # Append processing time as a new assistant message, aligned to the right
+            processing_message = f"<div style='text-align: right; font-style: italic; color: grey;'>Processed in {processing_time:.2f} seconds</div>"
+            history.append([None, processing_message])
+            yield history, ""  # Yield the final history with processing time
+
+        # Submit event for streaming
+        textbox.submit(
+            update_chat, 
+            inputs=[textbox, chatbot], 
+            outputs=[chatbot, textbox]  # Update both chatbot and textbox
+        )
+
+    demo.launch()
+
+if __name__ == "__main__":
+    main()
