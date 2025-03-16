@@ -1,26 +1,31 @@
 """Ingest PDF documents into a Chroma vector store using Ollama embeddings."""
 
+import logging
 from uuid import uuid4
 from langchain_community.document_loaders import PyPDFDirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
-import config  # Import configuration
+import config
 
-def initialize_vector_store():
-    """Initialize the Chroma vector store with Ollama embeddings."""
+logging.basicConfig(level=logging.INFO)
+
+def initialize_vector_store() -> Chroma:
+    """Initialize and return the Chroma vector store."""
     embeddings = OllamaEmbeddings(model=config.EMBEDDING_MODEL)
     return Chroma(
         collection_name=config.COLLECTION_NAME,
         embedding_function=embeddings,
-        persist_directory=config.CHROMA_PATH,
+        persist_directory=str(config.CHROMA_PATH),
     )
 
-def load_and_split_documents(data_path):
-    """Load PDF documents and split them into chunks."""
+def load_and_split_documents(data_path: str):
+    """Load and split PDF documents into smaller chunks."""
     loader = PyPDFDirectoryLoader(data_path)
     raw_documents = loader.load()
-    
+    if not raw_documents:
+        raise ValueError(f"No documents found in {data_path}")
+
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=config.CHUNK_SIZE,
         chunk_overlap=config.CHUNK_OVERLAP,
@@ -30,15 +35,15 @@ def load_and_split_documents(data_path):
     return text_splitter.split_documents(raw_documents)
 
 def ingest_data():
-    """Ingest documents into the vector store."""
+    """Ingest PDF chunks into the vector store."""
     try:
         vector_store = initialize_vector_store()
-        chunks = load_and_split_documents(config.DATA_PATH)
-        uuids = [str(uuid4()) for _ in range(len(chunks))]
-        vector_store.add_documents(documents=chunks, ids=uuids)
-        print(f"Successfully ingested {len(chunks)} chunks into the vector store.")
+        chunks = load_and_split_documents(str(config.DATA_PATH))
+        ids = [str(uuid4()) for _ in chunks]
+        vector_store.add_documents(documents=chunks, ids=ids)
+        logging.info(f"Successfully ingested {len(chunks)} chunks.")
     except Exception as e:
-        print(f"Error during ingestion: {e}")
+        logging.error(f"Error during ingestion: {e}", exc_info=True)
 
 if __name__ == "__main__":
     ingest_data()

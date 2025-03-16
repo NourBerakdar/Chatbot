@@ -16,4 +16,4 @@ CHUNK_SIZE = 300
 CHUNK_OVERLAP = 100
 
 # Retrieval settings
-NUM_RESULTS = 5
+NUM_RESULTS = 3
