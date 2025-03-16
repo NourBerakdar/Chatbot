@@ -65,7 +65,7 @@ def main():
             if history is None:
                 history = []
             # Append user message to history and yield immediately to show it
-            history.append([message, ""])
+            history.append([message, "processing"])
             yield history, ""  # Show the user's message in the UI and clear the textbox
             
             # Measure processing time
