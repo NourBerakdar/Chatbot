@@ -40,12 +40,12 @@ def generate_response(message: str, history, retriever, llm):
         knowledge = web_search(message)
 
     prompt = f"""You are a helpful assistant.
-Only answer based on the knowledge section below. If it's empty, you may generalize.
+                Only answer based on the knowledge section below. If it's empty, you may generalize.
 
-Question: {message}
-Conversation history: {history}
-Knowledge: {knowledge}
-"""
+                Question: {message}
+                Conversation history: {history}
+                Knowledge: {knowledge}
+                """
 
     partial_message = ""
     for chunk in llm.stream(prompt):
